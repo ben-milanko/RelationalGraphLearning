@@ -1,4 +1,5 @@
 import logging
+from operator import itemgetter
 import random
 import math
 
@@ -7,6 +8,7 @@ import matplotlib.lines as mlines
 from matplotlib import patches
 import numpy as np
 from numpy.linalg import norm
+import pickle
 
 from crowd_sim.envs.policy.policy_factory import policy_factory
 from crowd_sim.envs.utils.state import tensor_to_joint_state, JointState
@@ -73,6 +75,12 @@ class CrowdSim(gym.Env):
         self.human_goals = []
 
         self.phase = None
+        
+        #Trajnet
+        self.frame = 0
+        self.global_frame = 0
+        self.trajnet = True
+        self.trajnet_samples = pickle.load(open('trajnet/reordered_bookstore.p', 'rb'))
 
     def configure(self, config):
         self.config = config
@@ -343,10 +351,53 @@ class CrowdSim(gym.Env):
 
             # update all agents
             self.robot.step(action)
-            for human, action in zip(self.humans, human_actions):
-                human.step(action)
-                if self.nonstop_human and human.reached_destination():
-                    self.generate_human(human)
+            
+            # Applying the trajnet movement to humans in the sim
+            if self.trajnet:
+                sample = self.trajnet_samples[self.global_frame]
+
+                #Sorting the sample to get the 5 closest humans to the robot
+                for i in range(len(sample)):
+                    dist = np.sqrt(np.square(self.robot.px-float(sample[i][1]))+np.square(self.robot.py-float(sample[i][2])))
+                    sample[i].append(dist)
+
+                sample = sorted(sample, key=itemgetter(3))
+                sample = sample[:self.human_num-1]
+
+                
+                for i in range(len(self.humans)):
+                    # Preserving the position
+                    pos_set = False
+                    # if self.humans[i].human_id != None:
+                    #     for human_sample in sample:
+                    #         if human_sample[0] == self.humans[i].human_id and human_sample[3] < self.robot.sensor_radius:
+                    #             self.humans[i].set_position([float(human_sample[1]), float(human_sample[2])])
+                    #             pos_set = True
+
+                    if not pos_set:
+                        if len(sample) > i:
+                            # Save the trajectory id so the same trajectory can be applied in the next frame
+                            self.humans[i].human_id = sample[i][0]
+                            new_position = [float(sample[i][1]), float(sample[i][2])]
+                            
+                            # Calculate & set velocity
+                            if sample[i][3] > self.robot.sensor_radius:
+                                dx = (new_position[0] - self.robot.px)/sample[i][3] * self.robot.sensor_radius
+                                dy = (new_position[1] - self.robot.py)/sample[i][3] * self.robot.sensor_radius
+                                new_position = [dx+self.robot.px, dy+self.robot.py]
+
+                            new_velocity = [(new_position[0] - self.humans[i].px)/self.time_step, (new_position[1] - self.humans[i].py)/self.time_step]
+                            self.humans[i].set_velocity(new_velocity)
+
+                            self.humans[i].set_position(new_position)
+                        else:
+                            self.humans[i].set_position([self.robot.sensor_radius+self.robot.px, self.robot.py])
+            else:
+                for human, action_human in zip(self.humans, human_actions):
+                    human.step(action_human)
+                    if self.nonstop_human and human.reached_destination():
+                        self.generate_human(human)
+
 
             self.global_time += self.time_step
             self.states.append([self.robot.get_full_state(), [human.get_full_state() for human in self.humans],
