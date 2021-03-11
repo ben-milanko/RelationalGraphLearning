@@ -149,7 +149,7 @@ class BaseTrainConfig(object):
     train.target_update_interval = 1000
     train.evaluation_interval = 1000
     # the memory pool can roughly store 2K episodes, total size = episodes * 50
-    train.capacity = 100000
+    train.capacity = 2 #TODO Change back to 10,000. Changed to 2 for evaluating trajnet visualisation
     train.epsilon_start = 0.5
     train.epsilon_end = 0.1
     train.epsilon_decay = 4000
